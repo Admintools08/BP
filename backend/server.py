@@ -10,6 +10,8 @@ import jwt
 import hashlib
 import uuid
 from bson import ObjectId
+import asyncio
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # Database setup
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
@@ -31,6 +33,9 @@ app.add_middleware(
 SECRET_KEY = "your-secret-key-here"
 ALGORITHM = "HS256"
 security = HTTPBearer()
+
+# AI setup
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 # Pydantic models
 class UserRegister(BaseModel):
@@ -80,6 +85,173 @@ class MilestoneCreate(BaseModel):
     can_teach_others: bool
     hours_invested: float
     project_certificate_link: Optional[str] = None
+
+class AIRecommendation(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    description: str
+    skill_category: str
+    recommended_resources: List[str]
+    difficulty_level: str
+    estimated_hours: int
+    priority_score: int
+    created_at: str
+
+# AI Service for learning recommendations
+class LearningRecommendationService:
+    def __init__(self):
+        self.api_key = OPENAI_API_KEY
+    
+    async def generate_recommendations(self, user_profile: dict, goals: list, milestones: list) -> List[dict]:
+        if not self.api_key:
+            return []
+        
+        try:
+            # Create personalized learning context
+            context = self._build_learning_context(user_profile, goals, milestones)
+            
+            # Initialize AI chat
+            chat = LlmChat(
+                api_key=self.api_key,
+                session_id=f"learning-rec-{user_profile['id']}",
+                system_message="""You are an expert learning and career development advisor. 
+                Generate personalized learning recommendations based on the user's profile, goals, and progress.
+                
+                Respond with EXACTLY 5 recommendations in JSON format:
+                [
+                  {
+                    "title": "Short specific skill/topic title",
+                    "description": "Brief 2-3 sentence description of why this is valuable",
+                    "skill_category": "Category like 'Technical', 'Leadership', 'Design', etc.",
+                    "recommended_resources": ["Resource 1", "Resource 2", "Resource 3"],
+                    "difficulty_level": "Beginner/Intermediate/Advanced",
+                    "estimated_hours": 8,
+                    "priority_score": 85
+                  }
+                ]
+                
+                Make recommendations practical, specific, and aligned with their career trajectory."""
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=context)
+            
+            # Get AI response
+            response = await chat.send_message(user_message)
+            
+            # Parse and validate response
+            recommendations = self._parse_ai_response(response, user_profile['id'])
+            return recommendations
+            
+        except Exception as e:
+            print(f"AI recommendation error: {str(e)}")
+            return []
+    
+    def _build_learning_context(self, user_profile: dict, goals: list, milestones: list) -> str:
+        skills_learned = []
+        recent_sources = set()
+        total_hours = 0
+        
+        for milestone in milestones[-10:]:  # Last 10 milestones
+            skills_learned.append(milestone.get('what_learned', ''))
+            recent_sources.add(milestone.get('learning_source', ''))
+            total_hours += milestone.get('hours_invested', 0)
+        
+        active_goal_titles = [goal.get('title', '') for goal in goals if goal.get('status') == 'active']
+        
+        context = f"""
+        EMPLOYEE PROFILE:
+        - Name: {user_profile.get('full_name', '')}
+        - Position: {user_profile.get('position', '')}
+        - Department: {user_profile.get('department', '')}
+        - Experience: {user_profile.get('date_of_joining', '')}
+        - Current Skills: {', '.join(user_profile.get('existing_skills', []))}
+        - Learning Interests: {', '.join(user_profile.get('learning_interests', []))}
+        
+        CURRENT LEARNING GOALS:
+        {', '.join(active_goal_titles) if active_goal_titles else 'No active goals'}
+        
+        RECENT LEARNING ACTIVITY:
+        - Recent Skills Learned: {'; '.join(skills_learned[-5:]) if skills_learned else 'No recent activity'}
+        - Learning Sources Used: {', '.join(list(recent_sources)) if recent_sources else 'None'}
+        - Total Learning Hours: {total_hours} hours
+        
+        Please recommend 5 personalized learning opportunities that would:
+        1. Build on their existing skills and interests
+        2. Advance their career in their current role/department
+        3. Introduce complementary skills they haven't explored
+        4. Include both technical and soft skills where appropriate
+        5. Consider their learning pace and current workload
+        """
+        
+        return context
+    
+    def _parse_ai_response(self, response: str, user_id: str) -> List[dict]:
+        try:
+            import json
+            # Extract JSON from response
+            response_clean = response.strip()
+            if response_clean.startswith('```json'):
+                response_clean = response_clean.replace('```json', '').replace('```', '').strip()
+            elif response_clean.startswith('```'):
+                response_clean = response_clean.replace('```', '').strip()
+            
+            recommendations_data = json.loads(response_clean)
+            
+            recommendations = []
+            for idx, rec in enumerate(recommendations_data[:5]):  # Limit to 5
+                recommendation = {
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "title": rec.get('title', f'Learning Recommendation {idx + 1}'),
+                    "description": rec.get('description', 'Personalized learning recommendation'),
+                    "skill_category": rec.get('skill_category', 'General'),
+                    "recommended_resources": rec.get('recommended_resources', []),
+                    "difficulty_level": rec.get('difficulty_level', 'Intermediate'),
+                    "estimated_hours": rec.get('estimated_hours', 8),
+                    "priority_score": rec.get('priority_score', 75),
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                recommendations.append(recommendation)
+            
+            return recommendations
+        except Exception as e:
+            print(f"Error parsing AI response: {str(e)}")
+            # Fallback recommendations
+            return self._fallback_recommendations(user_id)
+    
+    def _fallback_recommendations(self, user_id: str) -> List[dict]:
+        """Fallback recommendations if AI fails"""
+        fallback_recs = [
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "title": "Time Management & Productivity",
+                "description": "Essential skills for any professional to maximize efficiency and reduce stress.",
+                "skill_category": "Productivity",
+                "recommended_resources": ["Getting Things Done book", "Pomodoro Technique", "Notion workspace setup"],
+                "difficulty_level": "Beginner",
+                "estimated_hours": 6,
+                "priority_score": 85,
+                "created_at": datetime.utcnow().isoformat()
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "title": "Communication & Presentation Skills",
+                "description": "Improve your ability to communicate ideas clearly and present with confidence.",
+                "skill_category": "Soft Skills",
+                "recommended_resources": ["Toastmasters", "TED Talks on communication", "Presentation design courses"],
+                "difficulty_level": "Intermediate",
+                "estimated_hours": 10,
+                "priority_score": 80,
+                "created_at": datetime.utcnow().isoformat()
+            }
+        ]
+        return fallback_recs
+
+# Initialize AI service
+ai_service = LearningRecommendationService()
 
 # Helper functions
 def hash_password(password: str) -> str:
@@ -279,6 +451,51 @@ async def delete_milestone(milestone_id: str, user_id: str = Depends(get_current
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Milestone not found")
     return {"message": "Milestone deleted successfully"}
+
+# AI Recommendations endpoints
+@app.get("/api/ai-recommendations")
+async def get_ai_recommendations(user_id: str = Depends(get_current_user)):
+    """Get personalized AI learning recommendations"""
+    try:
+        # Get user profile, goals, and milestones
+        user_profile = db.users.find_one({"id": user_id}, {"password": 0, "_id": 0})
+        goals = list(db.goals.find({"user_id": user_id}, {"_id": 0}))
+        milestones = list(db.milestones.find({"user_id": user_id}, {"_id": 0}).sort([("created_at", -1)]))
+        
+        if not user_profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Generate recommendations using AI
+        recommendations = await ai_service.generate_recommendations(user_profile, goals, milestones)
+        
+        # Store recommendations in database for caching
+        if recommendations:
+            # Clear old recommendations
+            db.ai_recommendations.delete_many({"user_id": user_id})
+            # Insert new ones
+            for rec in recommendations:
+                db.ai_recommendations.insert_one(rec)
+        
+        return recommendations
+        
+    except Exception as e:
+        print(f"Error generating recommendations: {str(e)}")
+        # Return cached recommendations if available
+        cached = list(db.ai_recommendations.find({"user_id": user_id}, {"_id": 0}))
+        if cached:
+            return cached
+        else:
+            # Return basic fallback recommendations
+            return ai_service._fallback_recommendations(user_id)
+
+@app.post("/api/ai-recommendations/refresh")
+async def refresh_ai_recommendations(user_id: str = Depends(get_current_user)):
+    """Force refresh AI recommendations"""
+    # Clear cached recommendations
+    db.ai_recommendations.delete_many({"user_id": user_id})
+    
+    # Get fresh recommendations
+    return await get_ai_recommendations(user_id)
 
 # Resource directory endpoints
 @app.get("/api/resources")
