@@ -213,6 +213,53 @@ class LearningTrackerAPITester:
         
         return success
 
+    def test_get_ai_recommendations(self):
+        """Test getting AI learning recommendations"""
+        success, response = self.run_test(
+            "Get AI Recommendations",
+            "GET",
+            "api/ai-recommendations",
+            200
+        )
+        
+        if success and isinstance(response, list):
+            print(f"   Found {len(response)} AI recommendations")
+            if len(response) > 0:
+                rec = response[0]
+                print(f"   Sample recommendation: {rec.get('title', 'N/A')}")
+                print(f"   Priority: {rec.get('priority_score', 'N/A')}")
+                print(f"   Difficulty: {rec.get('difficulty_level', 'N/A')}")
+                print(f"   Estimated hours: {rec.get('estimated_hours', 'N/A')}")
+                
+                # Validate recommendation structure
+                required_fields = ['id', 'user_id', 'title', 'description', 'skill_category', 
+                                 'recommended_resources', 'difficulty_level', 'estimated_hours', 
+                                 'priority_score', 'created_at']
+                missing_fields = [field for field in required_fields if field not in rec]
+                if missing_fields:
+                    print(f"   ⚠️  Missing fields: {missing_fields}")
+                else:
+                    print(f"   ✅ All required fields present")
+        
+        return success
+
+    def test_refresh_ai_recommendations(self):
+        """Test refreshing AI learning recommendations"""
+        success, response = self.run_test(
+            "Refresh AI Recommendations",
+            "POST",
+            "api/ai-recommendations/refresh",
+            200
+        )
+        
+        if success and isinstance(response, list):
+            print(f"   Refreshed {len(response)} AI recommendations")
+            if len(response) > 0:
+                rec = response[0]
+                print(f"   New recommendation: {rec.get('title', 'N/A')}")
+        
+        return success
+
 def main():
     print("🚀 Starting Learning Tracker API Tests")
     print("=" * 50)
