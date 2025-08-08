@@ -290,6 +290,10 @@ def main():
     test_results.append(("Dashboard Stats", tester.test_get_dashboard_stats()))
     test_results.append(("Learning Resources", tester.test_get_resources()))
     
+    # AI Recommendations tests (NEW FEATURE)
+    test_results.append(("AI Recommendations", tester.test_get_ai_recommendations()))
+    test_results.append(("Refresh AI Recommendations", tester.test_refresh_ai_recommendations()))
+    
     # Print final results
     print("\n" + "=" * 50)
     print("📊 TEST RESULTS SUMMARY")
