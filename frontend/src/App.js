@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select';
 import { Switch } from './components/ui/switch';
 import { Separator } from './components/ui/separator';
-import { Plus, Target, BookOpen, Clock, TrendingUp, Award, Users, Lightbulb } from 'lucide-react';
+import { Plus, Target, BookOpen, Clock, TrendingUp, Award, Users, Lightbulb, Sparkles, RefreshCw, Brain } from 'lucide-react';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
@@ -27,6 +27,8 @@ function App() {
   const [goals, setGoals] = useState([]);
   const [milestones, setMilestones] = useState([]);
   const [resources, setResources] = useState([]);
+  const [aiRecommendations, setAiRecommendations] = useState([]);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -78,6 +80,27 @@ function App() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     }
+  };
+
+  const fetchAIRecommendations = async (refresh = false) => {
+    setLoadingAI(true);
+    try {
+      const endpoint = refresh ? '/api/ai-recommendations/refresh' : '/api/ai-recommendations';
+      const method = refresh ? 'POST' : 'GET';
+      
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const recommendations = await response.json();
+        setAiRecommendations(recommendations);
+      }
+    } catch (error) {
+      console.error('Error fetching AI recommendations:', error);
+    }
+    setLoadingAI(false);
   };
 
   const handleAuth = async (endpoint, data) => {
@@ -179,10 +202,11 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="goals">Goals</TabsTrigger>
             <TabsTrigger value="milestones">Milestones</TabsTrigger>
+            <TabsTrigger value="ai-recommendations">AI Suggestions</TabsTrigger>
             <TabsTrigger value="resources">Resources</TabsTrigger>
           </TabsList>
 
@@ -205,6 +229,14 @@ function App() {
               milestones={milestones} 
               goals={goals}
               onCreateMilestone={createMilestone}
+            />
+          </TabsContent>
+
+          <TabsContent value="ai-recommendations">
+            <AIRecommendationsView 
+              recommendations={aiRecommendations}
+              onFetchRecommendations={fetchAIRecommendations}
+              loading={loadingAI}
             />
           </TabsContent>
 
@@ -435,6 +467,97 @@ function DashboardView({ stats, goals, milestones, onCreateGoal, onCreateMilesto
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// AI Recommendations View Component
+function AIRecommendationsView({ recommendations, onFetchRecommendations, loading }) {
+  useEffect(() => {
+    if (recommendations.length === 0) {
+      onFetchRecommendations();
+    }
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div className="flex items-center space-x-3">
+          <Brain className="w-8 h-8 text-purple-600" />
+          <div>
+            <h2 className="text-2xl font-bold">AI Learning Recommendations</h2>
+            <p className="text-gray-600">Personalized suggestions based on your profile and progress</p>
+          </div>
+        </div>
+        <Button 
+          onClick={() => onFetchRecommendations(true)} 
+          disabled={loading}
+          className="flex items-center space-x-2"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <span>{loading ? 'Generating...' : 'Refresh'}</span>
+        </Button>
+      </div>
+
+      {loading && recommendations.length === 0 ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center space-y-4">
+            <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
+              <Sparkles className="w-6 h-6 text-white" />
+            </div>
+            <p className="text-gray-600">AI is analyzing your learning patterns...</p>
+          </div>
+        </div>
+      ) : recommendations.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {recommendations.map((rec) => (
+            <Card key={rec.id} className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle className="text-lg">{rec.title}</CardTitle>
+                    <div className="flex space-x-2 mt-2">
+                      <Badge variant="secondary">{rec.skill_category}</Badge>
+                      <Badge variant="outline">{rec.difficulty_level}</Badge>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium text-purple-600">
+                      Priority: {rec.priority_score}%
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      ~{rec.estimated_hours}h
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-600 mb-4">{rec.description}</p>
+                
+                {rec.recommended_resources && rec.recommended_resources.length > 0 && (
+                  <div>
+                    <h4 className="font-medium mb-2 text-sm">Recommended Resources:</h4>
+                    <div className="space-y-1">
+                      {rec.recommended_resources.slice(0, 3).map((resource, index) => (
+                        <div key={index} className="text-sm text-gray-600 flex items-center">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                          {resource}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <Lightbulb className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-600 mb-2">No recommendations yet</h3>
+          <p className="text-gray-500">Complete your profile and add some milestones to get personalized AI suggestions.</p>
+        </div>
+      )}
     </div>
   );
 }
